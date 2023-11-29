@@ -1,0 +1,4 @@
+docker: dragonflyscience/dragonverse-kyuhan:v2
+memory: 16
+cpus: 16
+allows: ["PollockRelease-manuscript", "PollockRelease-output"]
