@@ -1,3 +1,10 @@
+// --------------------------------------------------------------
+// Length-Based Age-Structured Model by Kyuhan Kim
+// Copyright © 2023 Kyuhan Kim. All rights reserved.
+// Contact: kh2064@gmail.com for questions
+// MIT License: https://opensource.org/licenses/MIT
+// --------------------------------------------------------------
+
 functions{
   #include "../Submodel/Selex.stan"
   #include "../Submodel/StockRecruitment.stan"

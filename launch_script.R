@@ -1,3 +1,14 @@
+#--------------------------------------------------------------
+# Length-Based Age-Structured Model by Kyuhan Kim
+# Copyright © 2023 Kyuhan Kim. All rights reserved.
+# Contact: kh2064@gmail.com for questions
+# MIT License: https://opensource.org/licenses/MIT
+# --------------------------------------------------------------
+
+# This script is to run the pollock assessment
+# run this entire script to run the job
+# it will take days to finish the job, so it was originally designed to run on gateaux.io (api server)
+
 ##############
 ## Preamble ##
 ##############
@@ -7,11 +18,8 @@ setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 require(bakeR)
 require(dplyr)
 
-LocalRun=F
-
-
-#following jobs were rerun because of unnknown error
-#reRunIndex=which(c(4628:4659) %in% c(4628, 4629, 4633, 4653))
+## only local run mode works with this version (original version was designed for gateaux.io)
+LocalRun=T 
 
 #####################
 ## sampling option ##
@@ -100,10 +108,8 @@ parsSensitivity <- lapply(1:nrow(parsComb), function(ll){
 
 names(parsSensitivity) <- paste('RUN',1:length(parsSensitivity), sep='_')
 
-parsSensitivity=parsSensitivity[reRunIndex]
-
 ##########################################################################################
-################################### run the job (SCRA) ###############################
+################################### run the job (SCRA) ###################################
 ##########################################################################################
 
 if(LocalRun!=1) {
@@ -119,6 +125,6 @@ if(LocalRun!=1) {
                        log_jobs = F)
   }
 } else {
-  source("assessment.R")
+  source("assessment/assessment.R")
 }
 
