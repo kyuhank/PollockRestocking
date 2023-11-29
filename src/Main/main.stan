@@ -14,58 +14,58 @@ functions{
   }
 
 data {
-  int nbins;
-  int nCatchYears;
-  int A;
-  int nProj;
-  int nyears;
-  int nplatoons;
-  int FindBrps;
+  int nbins;        // number of length bins
+  int nCatchYears;  // number of years of catch data
+  int A;            // number of age classes
+  int nProj;        // number of projection years
+  int nyears;       // number of years
+  int nplatoons;    // number of platoons
+  int FindBrps;     // find Biological Reference Points?
   
-  vector[nbins] bins;
-  vector[nCatchYears] JYt;
-  vector[nCatchYears] AYt;
-  vector[nbins] LengthWeight;
-  vector[nbins] Maturity;
-  vector[nyears] Release;
-  vector[nplatoons] Rprop;
+  vector[nbins] bins;          // length bins
+  vector[nCatchYears] JYt;     // juvenile catch data
+  vector[nCatchYears] AYt;     // adult catch data
+  vector[nbins] LengthWeight;  // length-weight relationship
+  vector[nbins] Maturity;      // maturity-at-length
+  vector[nyears] Release;      // release numbers
+  vector[nplatoons] Rprop;     // proportion of recruits in each platoon
   
-  real FemaleProp;
+  real FemaleProp;             // female proportion
   
-  real LrefForM;
+  real LrefForM;               // reference length for natural mortality
   
-  array[nplatoons] matrix[A, nbins] LengthDist;
+  array[nplatoons] matrix[A, nbins] LengthDist;  // length-at-age distribution
   
-  real steepPoint;
+  real steepPoint;             // steepness point (default: 0.2)
   //real gamma;
   
-  real NatExponent;
+  real NatExponent;            // length-dependent natural mortality model exponent
   
   //real L05;
   //real L95;
-  real sigR;
-  real JuvMaxVul;
-  real AduMaxVul;
+  real sigR;                   // recruitment standard deviation
+  real JuvMaxVul;              // maximum juvenile vulnerability
+  real AduMaxVul;              // maximum adult vulnerability
+              
+  real L05_low;                // lower bound of L05
+  real L05_up;                 // upper bound of L05
   
-  real L05_low;
-  real L05_up;
-  
-  real L95_low;
-  real L95_up;
+  real L95_low;               // lower bound of L95
+  real L95_up;                // upper bound of L95
   
   }
 
 parameters {
   
-  real R0;
-  real Natural_M;
-  real steepness;
-  real gamma;
-  real L95;
-  real L05;
-  vector[nyears+A-1] Rdev;
-  vector[nyears] L05dev;
-  vector[nyears] L95dev;
+  real R0;                     // unfished recruitment
+  real Natural_M;              // natural mortality
+  real steepness;              // steepness
+  real gamma;                  // depensation parameter
+  real L95;                    // length at 95% selectivity
+  real L05;                    // length at 5% selectivity
+  vector[nyears+A-1] Rdev;     // recruitment deviations
+  vector[nyears] L05dev;       // L05 deviations
+  vector[nyears] L95dev;       // L95 deviations
   
   }
   
