@@ -3,11 +3,9 @@
 ## make input data obj ##
 #########################
 
-MakeInputObj=function (nProj=14,                          ## to 2035 (roughly two gen)
+MakeInputObj=function (nProj=14,               ## to 2035 (roughly two gen)
                        nRelease=0,
                        nReleasePeriod=10,      ## from 2015 to 2024
-                       #L95=25,
-                       #L05=14,
                        nogariL05=27,
                        nogariL95=30,
                        AdultFraction=0.5,
@@ -154,8 +152,6 @@ MakeInputObj=function (nProj=14,                          ## to 2035 (roughly tw
   ####### Fork-Total (from Kim and Hyun 2018) ###########
   #######################################################
   
-  #25.47
-  
   TL=1:60
   FL=-0.424+0.959*TL
   
@@ -185,8 +181,7 @@ MakeInputObj=function (nProj=14,                          ## to 2035 (roughly tw
   #################################################
   
   Nogari=1-Sel(bins, nogariL05, nogariL95)
-  #Vul=Sel(bins, L05, L95)
-  
+
    
   Inputs=list("bins"=bins,
               "nbins"=length(bins),
