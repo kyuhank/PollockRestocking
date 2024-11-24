@@ -162,8 +162,6 @@ eqE=function(A,
 PriorPushForwardCheck=function(InputData,
                                chains=10,
                                InputPriorDraws=10^3,
-                               #JuvCollapse=52,
-                               #AdultCollapse=62,
                                nupdate=999,
                                SimObj,
                                R0_min=2e+6,
@@ -236,7 +234,6 @@ PriorPushForwardCheck=function(InputData,
     
     ## random draws for every iteration from the joint prior (original BH parameterisation)
     InputPrior=draws_array("R0"=replicate(chains, runif(InputPriorDraws, min = R0_min, max = R0_max)),
-      #"R0"=replicate(chains, rlnorm(InputPriorDraws, log(1e+9), 2)),
       "Natural_M"=replicate(chains, exp(rnorm(InputPriorDraws, log(Mmedian), sigM))),
                            "steepness"=replicate(chains, rbeta(InputPriorDraws, Steep_alpha, Steep_beta)*0.8+0.2),
                            "gamma"=replicate(chains, runif(InputPriorDraws, gamma_min, gamma_max)),
@@ -246,15 +243,10 @@ PriorPushForwardCheck=function(InputData,
 
     
     ### attach Rdev values ####
-    #Rdev=aperm( replicate(chains, MASS::mvrnorm(InputPriorDraws, mu = rep(0, dim(Sigma)[1]), Sigma = Sigma), c(2,3,1) ))
-    #Rdev=aperm( replicate(chains, replicate(InputPriorDraws, AutoRdev(RdevCor, sigR, nyears+A-1) )), c(2,3,1) )
-    
     Rdev=aperm(  replicate(chains, replicate(InputPriorDraws, MASS::mvrnorm(1, mu = rep(0, dim(Sig)[1]), Sigma = Sig))) , c(2,3,1) )
     L05dev=aperm(  replicate(chains, replicate(InputPriorDraws, MASS::mvrnorm(1, mu = rep(0, dim(SigL05)[1]), Sigma = SigL05))) , c(2,3,1) )
     L95dev=aperm(  replicate(chains, replicate(InputPriorDraws, MASS::mvrnorm(1, mu = rep(0, dim(SigL95)[1]), Sigma = SigL95))) , c(2,3,1) )
     
-    
-    #browser()
     
     dimnames(Rdev)[[3]]<-paste("Rdev[",1:(nyears+A-1),"]", sep='')
     InputPrior=as_draws(abind::abind(InputPrior, Rdev))
@@ -274,22 +266,11 @@ PriorPushForwardCheck=function(InputData,
                                                                  parallel_chains = dim(InputPrior)[2], ...)}, file=nullfile())
     
     
-    #PushForwardCheck<-SimObj$generate_quantities(data = InputData, 
-    #                                                             fitted_params =InputPrior, 
-    #                                                             parallel_chains = dim(InputPrior)[2], ...)
-    
-    
-    
-    
     ## draw samples of interest for conditioning
     JBStatus=PushForwardCheck$draws("JBStatus")
     ABStatus=PushForwardCheck$draws("ABStatus")
     BStatus=PushForwardCheck$draws("TBStatus")
     SSBStatus=PushForwardCheck$draws("SSBStatus")
-    
-   # browser()
-    
-  #  print(as_draws_matrix(BStatus )[,10])
     
     ## fishery collapse defined based on the assumption: B/B0<0.1 (Worm and Hilborn, 2009)
     SelectedSamples=which(c(JBStatus[,,JuvCollapse])<ThresCollapse & c(ABStatus[,,AdultCollapse])<ThresCollapse 
@@ -307,7 +288,6 @@ PriorPushForwardCheck=function(InputData,
     ## report the process
     if(verbose==1) { 
       print(paste("iter-",i,": ", SamNum, "/", SamNumLimit, sep=""))
-      #print(paste("run-",i,": ", length(SelectedSamples), "/", InputPriorDraws*chains, " (total: ", SamNum,")", sep=""))
     }
     
     ## stopping criteria  
@@ -365,14 +345,7 @@ DeriveQuantities=function(InputData,
   
   JBStatus=as_draws_matrix(ModelPredicted$draws("JBStatus"))
   ABStatus=as_draws_matrix(ModelPredicted$draws("ABStatus"))
-#  availBStatus=as_draws_matrix(ModelPredicted$draws("availBStatus"))
   TBStatus=as_draws_matrix(ModelPredicted$draws("TBStatus"))
-  
-#  JHt=as_draws_matrix(ModelPredicted$draws("JHt"))
-#  AHt=as_draws_matrix(ModelPredicted$draws("AHt"))
-  
-#  JCt=as_draws_matrix(ModelPredicted$draws("JCt"))
-#  ACt=as_draws_matrix(ModelPredicted$draws("ACt"))
   
   SSBt=as_draws_matrix(ModelPredicted$draws("SSBt"))
   SSBStatus=as_draws_matrix(ModelPredicted$draws("SSBStatus"))
@@ -387,12 +360,7 @@ DeriveQuantities=function(InputData,
               "JBStatus"=JBStatus,
               "ABStatus"=ABStatus,
               "SSBStatus"=SSBStatus,
-#              "availBStatus"=availBStatus,
               "TBStatus"=TBStatus,
-#              "JHt"=JHt,
-#              "AHt"=AHt,
-#              "JCt"=JCt,
-#              "ACt"=ACt,
               "SSBt"=SSBt) )
   
 }
