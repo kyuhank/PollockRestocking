@@ -1,6 +1,7 @@
 This repository contains the code and data for the following paper:
 
-## A quantitative evaluation of the pollock *Gadus Chalcogrammus* restocking programme in South Korea
+## A quantitative evaluation of the pollock *Gadus Chalcogrammus* restocking programme in South Korea [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14211042.svg)](https://doi.org/10.5281/zenodo.14211042)
+
 
 *Kyuhan Kim, and Philipp Neubauer*
 
