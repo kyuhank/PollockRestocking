@@ -216,13 +216,7 @@ JBStatus=list()
 ABStatus=list()
 TBStatus=list()
 SSBStatus=list()
-#availBStatus=list()
-#JHt=list()
-#AHt=list()
-#JCt=list()
-#ACt=list()
 SSBt=list()
-#availBt=list()
 
 print(paste("nRuns: ",length(InputData),sep=""))
 
@@ -244,17 +238,10 @@ for (i in 1:length(InputData)) {
   ABt[[i]]=temp["ABt",]
   JBt[[i]]=temp["JBt",]
   Bt[[i]]=temp["Bt",]
-#  availBt[[i]]=temp["availBt",]
   TBStatus[[i]]=temp["TBStatus",]
   JBStatus[[i]]=temp["JBStatus",]
   ABStatus[[i]]=temp["ABStatus",]
   SSBStatus[[i]]=temp["SSBStatus",]
-#  availBStatus[[i]]=temp["availBStatus",]
-  
-#  JHt[[i]]=temp["JHt",]
-#  AHt[[i]]=temp["AHt",]
-#  JCt[[i]]=temp["JCt",]
-#  ACt[[i]]=temp["ACt",]
   SSBt[[i]]=temp["SSBt",]
   
 }
