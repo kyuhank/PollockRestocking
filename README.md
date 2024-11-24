@@ -1,5 +1,3 @@
-# PollockRestocking
-
 This repository contains the code and data for the following paper:
 
 ## A quantitative evaluation of the pollock *Gadus Chalcogrammus* restocking programme in South Korea
