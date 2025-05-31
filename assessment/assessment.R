@@ -31,6 +31,8 @@ if (!interactive()) {
   
   ## input pars (parallel run: multiple jobs) ##
   gamma <- as.numeric(Sys.getenv("gamma"))
+  steepness <- as.numeric(Sys.getenv("steepness"))
+  
   RdevCor <- as.numeric(Sys.getenv("RdevCor"))
   L05devCor <- as.numeric(Sys.getenv("L05devCor"))
   L95devCor <- as.numeric(Sys.getenv("L95devCor"))
@@ -56,13 +58,18 @@ if (!interactive()) {
   sigL95 <- as.numeric(Sys.getenv()[grep(names(Sys.getenv()), pattern = "sigL95" )])
   JuvMaxVul <- as.numeric(Sys.getenv()[grep(names(Sys.getenv()), pattern = "JuvMaxVul" )])
   AduMaxVul <- as.numeric(Sys.getenv()[grep(names(Sys.getenv()), pattern = "AduMaxVul" )])
-  AdultFraction <- as.numeric(Sys.getenv()[grep(names(Sys.getenv()), pattern = "AdultFraction" )])
+  
+  #AdultFraction <- as.numeric(Sys.getenv()[grep(names(Sys.getenv()), pattern = "AdultFraction" )])
+  
+  #CatchSepYr <- as.numerir(Sys.getenv()[grep(names(Sys.getenv()), pattern = "CatchSepYr" )])
+  
+  
   PmixL <- as.numeric(Sys.getenv()[grep(names(Sys.getenv()), pattern = "PmixL" )])
   NatExponent <- as.numeric(Sys.getenv()[grep(names(Sys.getenv()), pattern = "NatExponent" )])
   Mmedian <- as.numeric(Sys.getenv("Mmedian"))
   sigM <- as.numeric(Sys.getenv("sigM"))
   
-  }
+}
 
 #### input values to make scenarios ####
 if (!interactive()) {
@@ -82,15 +89,15 @@ cat('\n\n Setup finished \n\n')
 ######################
 ### load functions ###
 ######################
-source("data/data.R")
-source("functions/functions.R")
+source("../Data_and_functions/data.R")
+source("../Data_and_functions/functions.R")
 
 #######################
 ## compile the model ##
 #######################
 
 ## simulation model
-SimModel <- cmdstanr::cmdstan_model('src/Main/main.stan',
+SimModel <- cmdstanr::cmdstan_model('../Model/Main/main.stan',
                                     pedantic=F, 
                                     force_recompile=F)
 
@@ -110,12 +117,14 @@ if(LocalRun==1) {
                                "sigL05"=sigL05,
                                "sigL95"=sigL95,
                                "gamma"=gamma,
+                               "steepness"=steepness,
                                "RdevCor"=RdevCor,
                                "L05devCor"=L05devCor,
                                "L95devCor"=L95devCor,
                                "JuvCollapseYear"=JuvCollapseYear,
                                "AduCollapseYear"=AduCollapseYear,
-                               "AdultFraction"=AdultFraction,
+                               #"AdultFraction"=AdultFraction,
+                               #"CatchSepYr"=CatchSepYr,
                                "PmixL"=PmixL,
                                "NatExponent"=NatExponent),
                    ## not expanding these below
@@ -129,11 +138,13 @@ if(LocalRun==1) {
                                "sigR"=sigR,
                                "sigL05"=sigL05,
                                "sigL95"=sigL95,
-                               "AdultFraction"=AdultFraction,
+                               #"CatchSepYr"=CatchSepYr,
+                               #"AdultFraction"=AdultFraction,
                                "PmixL"=PmixL,
                                "NatExponent"=NatExponent),
                    ## not expanding these below
                    cbind("gamma"=gamma,
+                         "steepness"=steepness,
                          "RdevCor"=RdevCor,
                          "L05devCor"=L05devCor,
                          "L95devCor"=L95devCor,
@@ -159,10 +170,12 @@ InputData=mapply(MakeInputObj,
                  L95_low = ExpandRuns[,"L95_low"],
                  L95_up = ExpandRuns[,"L95_up"],
                  gamma=ExpandRuns[,"gamma"],
+                 steepness=ExpandRuns[,"steepness"],
                  RdevCor=ExpandRuns[,"RdevCor"],
                  L05devCor=ExpandRuns[,"L05devCor"],
                  L95devCor=ExpandRuns[,"L95devCor"],
-                 AdultFraction=ExpandRuns[,"AdultFraction"],
+                 #AdultFraction=ExpandRuns[,"AdultFraction"],
+                 #CatchSepYr=ExpandRuns[,"CatchSepYr"],
                  PmixL=ExpandRuns[,"PmixL"],
                  NatExponent=ExpandRuns[,"NatExponent"],
                  JuvCollapseYear=ExpandRuns[,"JuvCollapseYear"],
@@ -182,7 +195,7 @@ UpdatedInputSample=list()
 print(paste("nRuns: ",length(InputData),sep=""))
 
 for (i in 1:length(InputData)) {
-
+  
   print(paste("Run-",i,sep=""))
   
   UpdatedInputSample[[i]]=PriorPushForwardCheck(InputData=InputData[[i]],
@@ -209,14 +222,23 @@ for (i in 1:length(InputData)) {
 cat('\n\n obtain derived quantities \n\n')  
 
 sf=list()
-ABt=list()
-JBt=list()
-Bt=list()
-JBStatus=list()
-ABStatus=list()
-TBStatus=list()
+#ABt=list()
+TJBt=list()
+#Bt=list()
+#JBStatus=list()
+#ABStatus=list()
+#TBStatus=list()
 SSBStatus=list()
+#availBStatus=list()
+#JHt=list()
+#AHt=list()
+#JCt=list()
+#ACt=list()
 SSBt=list()
+#availBt=list()
+SSBrel=list()
+JBrel=list()
+ABrel=list()
 
 print(paste("nRuns: ",length(InputData),sep=""))
 
@@ -232,16 +254,27 @@ for (i in 1:length(InputData)) {
                                           InputData= InputData[[i]]),
                           SIMPLIFY = T)
   
-  BioQuantOfInterest=c("SSBStatus", "SSBt")
+  BioQuantOfInterest=c("SSBStatus", "SSBt", "TJBT", "SSBrel", "JBrel", "ABrel")
   
   sf[[i]]=temp["sf",] %>% lapply(function(x) x %>% filter(grepl( paste(BioQuantOfInterest, collapse="|"), variable) ) )
-  ABt[[i]]=temp["ABt",]
-  JBt[[i]]=temp["JBt",]
-  Bt[[i]]=temp["Bt",]
-  TBStatus[[i]]=temp["TBStatus",]
-  JBStatus[[i]]=temp["JBStatus",]
-  ABStatus[[i]]=temp["ABStatus",]
+  #TABt[[i]]=temp["TABt",]
+  TJBt[[i]]=temp["TJBt",]
+  #Bt[[i]]=temp["Bt",]
+  SSBrel[[i]]=temp["SSBrel",]
+  JBrel[[i]]=temp["JBrel",]
+  ABrel[[i]]=temp["ABrel",]
+  
+  #  availBt[[i]]=temp["availBt",]
+  #TBStatus[[i]]=temp["TBStatus",]
+  #JBStatus[[i]]=temp["JBStatus",]
+  #ABStatus[[i]]=temp["ABStatus",]
   SSBStatus[[i]]=temp["SSBStatus",]
+  #  availBStatus[[i]]=temp["availBStatus",]
+  
+  #  JHt[[i]]=temp["JHt",]
+  #  AHt[[i]]=temp["AHt",]
+  #  JCt[[i]]=temp["JCt",]
+  #  ACt[[i]]=temp["ACt",]
   SSBt[[i]]=temp["SSBt",]
   
 }
@@ -255,19 +288,21 @@ rm(temp)
 ##### grooming ####
 ###################
 
-inputframe <- data.frame("sigR"=ExpandRuns[,"sigR"], 
+inputframe <- data.frame("sigR"=ExpandRuns[,"sigR"],
                          "sigL05"=ExpandRuns[,"sigL05"], 
                          "sigL95"=ExpandRuns[,"sigL95"], 
                          "JuvMaxVul"=ExpandRuns[,"JuvMaxVul"], 
                          "AduMaxVul"=ExpandRuns[,"AduMaxVul"],
                          "gamma"=ExpandRuns[,"gamma"],
+                         "steepness"=ExpandRuns[,"steepness"],
                          "RdevCor"=ExpandRuns[,"RdevCor"], 
                          "L05devCor"=ExpandRuns[,"L05devCor"],
                          "L95devCor"=ExpandRuns[,"L95devCor"], 
                          "JuvCollapseYear"=ExpandRuns[,"JuvCollapseYear"],
                          "AduCollapseYear"=ExpandRuns[,"AduCollapseYear"],
                          "PmixL"=ExpandRuns[,"PmixL"], 
-                         "AdultFraction"=ExpandRuns[,"AdultFraction"], 
+                         #"CatchSepYr"=ExpandRuns[,"CatchSepYr"],
+                         #"AdultFraction"=ExpandRuns[,"AdultFraction"], 
                          "R0_min"=R0_min, 
                          "R0_max"=R0_max, 
                          "Mmedian"=Mmedian,
@@ -282,7 +317,7 @@ inputframe <- data.frame("sigR"=ExpandRuns[,"sigR"],
                          "gamma_min"=gamma_min, 
                          "gamma_max"=gamma_max)
 
-  
+
 for (i in 1:length(InputData)) {
   sf[[i]]=sf[[i]] %>% bind_rows(.id = "ReleaseScenario" ) %>% bind_cols(inputframe[i,])
 }

@@ -25,8 +25,8 @@ LocalRun=T
 ## sampling option ##
 #####################
 
-nDraws=300
-nChains=14
+nDraws=400
+nChains=30
 minSampleNum=200
 
 #######################################
@@ -34,45 +34,50 @@ minSampleNum=200
 #######################################
 
 ## release options ##
-## base case: 10 times approx release number (200,000 fish) by South Korea gov
-baseRelease=2e+6
-multiple=c(0, 1, 100, 200, 300, 400, 500, 600, 700)
+## base case: average annual release number (230,000 fish) by South Korea gov
+baseRelease=230000
+multiple=c(0, 1, 10, 100, 1000, 10000)
 nRelease=multiple*baseRelease
 
 ## input pars for making scenarios (trigger parallel jobs) ##
-gamma=c(1, 2)                ## can also put prior (e.g., gamma=-99; gamma_min=1; gamma_max=3)
-RdevCor=c(0, 0.8)
-L05devCor=c(0.0, 0.8)
-L95devCor=c(0.0)
+gamma=c(1,2)                ## can also put prior (e.g., gamma=-99. gamma_min; gamma_max=3)
+steepness=c(-99)              ## can also put prior (e.g., steep=-99. Steep_alpha; Steep_beta)
+
+RdevCor=c(0, 0.4)
+L05devCor=c(0.0)              # no autocorrelation
+L95devCor=c(0.0)              # no autocorrelation
+
 
 JuvCollapseYear=c(52, 55)         ## 52: 1997;  55: 2000;  58: 2003;
-AduCollapseYear=c(55, 58)         
+AduCollapseYear=c(55, 58)
 
+PmixL=c(0.5, 5)
 
 ## nested runs (run within each job)
-PmixL=c(0.5, 5)
-AdultFraction=c(0.2, 0.8)
+
+
 JuvMaxVul=c(0.5, 1)
 AduMaxVul=c(0.5, 1)
-sigR=c(1)                  ## from US assessment reports
-sigL05=c(0.0)
-sigL95=c(0.0)
-NatExponent=c(0.0,-1)
+sigR=1                      ## from US assessment reports
+sigR_cond=sigR * sqrt(1-RdevCor^2)  
 
+sigL05=c(0.0)               # no autocorrelation
+sigL95=c(0.0)               # no autocorrelation
+NatExponent=c(0.0, -1)      ## Lorenzen et al., 2020
 
 ## prior setting ##
-R0_min=c(2e+6)
-R0_max=c(2e+10)
-Steep_alpha=2
+R0_min=c(2e+8)             ## from Kang et al., 2013
+R0_max=c(2e+11)            ## 1000 times larger than R0_min
+Steep_alpha=2          
 Steep_beta=2
 
 ## fix these values ##
-L05_low=13
-L05_up=17
-L95_low=23
-L95_up=27
-Mmedian=0.22
-sigM=0.5
+L05_low=10                 ## from Kang et al., 2013
+L05_up=15                  ## from Kang et al., 2013
+L95_low=20                 ## from Kang et al., 2013
+L95_up=25                  ## from Kang et al., 2013
+Mmedian=0.22               ## from Kooka et al., 2012
+sigM=0.3                 
 gamma_min=1
 gamma_max=3
 
@@ -81,35 +86,36 @@ gamma_max=3
 ########################
 
 #### all possible combinations ####
-parsComb=merge(expand.grid("gamma"=gamma, 
+parsComb=merge(expand.grid("gamma"=gamma,
+                           "steepness"=steepness,
                            "RdevCor"=RdevCor,
                            "L05devCor"=L05devCor,
                            "L95devCor"=L95devCor,
                            "JuvCollapseYear"=JuvCollapseYear,
-                           "AduCollapseYear"=AduCollapseYear),
+                           "AduCollapseYear"=AduCollapseYear,
+                           "PmixL"=PmixL),
                cbind(R0_min, R0_max, Steep_alpha, Steep_beta, L05_low, L05_up, L95_low, L95_up, gamma_min, gamma_max, Mmedian, sigM))
 
 
 parsSensitivity <- lapply(1:nrow(parsComb), function(ll){
   list(pars = c(as.list(parsComb[ll,]), as.list(c("nDraws"=nDraws,
-                                             "nChains"=nChains,
-                                             "minSampleNum"=minSampleNum,
-                                             "NatExponent"=NatExponent,
-                                             "sigR"=sigR,
-                                             "sigL05"=sigL05,
-                                             "sigL95"=sigL95,
-                                             "JuvMaxVul"=JuvMaxVul,
-                                             "AduMaxVul"=AduMaxVul,
-                                             "AdultFraction"=AdultFraction,
-                                             "PmixL"=PmixL
-                                             )),
-                nRelease=as.list(nRelease), ReleaseScenarioNumber=length(nRelease)) )
+                                                  "nChains"=nChains,
+                                                  "minSampleNum"=minSampleNum,
+                                                  "NatExponent"=NatExponent,
+                                                  "sigR"=sigR,
+                                                  "sigL05"=sigL05,
+                                                  "sigL95"=sigL95,
+                                                  "JuvMaxVul"=JuvMaxVul,
+                                                  "AduMaxVul"=AduMaxVul
+                                                  #"AdultFraction"=AdultFraction
+  )),
+  nRelease=as.list(nRelease), ReleaseScenarioNumber=length(nRelease)) )
 })
 
 names(parsSensitivity) <- paste('RUN',1:length(parsSensitivity), sep='_')
 
 ##########################################################################################
-################################### run the job (SCRA) ###################################
+################################### run the job (SCRA) ###############################
 ##########################################################################################
 
 if(LocalRun!=1) {
@@ -125,6 +131,5 @@ if(LocalRun!=1) {
                        log_jobs = F)
   }
 } else {
-  source("assessment/assessment.R")
+  source("assessment.R")
 }
-

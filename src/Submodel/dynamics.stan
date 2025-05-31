@@ -5,7 +5,6 @@
 // MIT License: https://opensource.org/licenses/MIT
 // --------------------------------------------------------------
 
-
 //dynamics loop
 matrix DynamicsN(int nCatchYears,
                  int A,
@@ -30,7 +29,8 @@ matrix DynamicsN(int nCatchYears,
                  vector Release,
                  vector Rdev,
                  vector Rprop,
-                 int nProj) {
+                 int nProj,
+                 int CatchSepYr) {
               
   
   int nyears=nCatchYears+nProj;
@@ -44,8 +44,18 @@ matrix DynamicsN(int nCatchYears,
   vector[nyears] Bt=rep_vector(0., nyears);
   vector[nyears] availBt=rep_vector(0., nyears);
   vector[nyears] SSBt=rep_vector(0., nyears);
+  vector[nyears] TJBt=rep_vector(0., nyears);
+  vector[nyears] TABt=rep_vector(0., nyears);
+  
   vector[nyears] JBt=rep_vector(0., nyears); 
   vector[nyears] ABt=rep_vector(0., nyears);
+  
+  
+  vector[nyears] SSBrel=rep_vector(0., nyears);
+  vector[nyears] JBrel=rep_vector(0., nyears); 
+  vector[nyears] ABrel=rep_vector(0., nyears);
+  
+  
   
   vector[nyears] JCt=rep_vector(0., nyears);
   vector[nyears] ACt=rep_vector(0., nyears);
@@ -59,13 +69,20 @@ matrix DynamicsN(int nCatchYears,
   vector[nyears] SSBStatus;
   vector[nyears] availBStatus;
   
-  matrix[A+16, nyears] OutPut; 
+  vector[nyears] JuvProp;
+  
+  matrix[A+19, nyears] OutPut; 
   
   real SSB0=0.;
   real B0=0.;
   real availB0=0.;
   real JB0=0.;
   real AB0=0.;
+  real SSBref=0.;
+  real ABref=0.;
+  real JBref=0.;
+  real TJB0=0.;
+  real TAB0=0.;
   
   vector[A] preSSBt=rep_vector(0., A);
   
@@ -86,6 +103,8 @@ matrix DynamicsN(int nCatchYears,
     B0+=unfishedN[p,a]*LengthDist[p,a,i]*LengthWeight[i];
     JB0+=unfishedN[p,a]*LengthDist[p,a,i]*LengthWeight[i]*JVulMean[i];
     AB0+=unfishedN[p,a]*LengthDist[p,a,i]*LengthWeight[i]*AVul[i];
+    TJB0+=unfishedN[p,a]*LengthDist[p,a,i]*LengthWeight[i]*(1.-Maturity[i]);
+    TAB0+=unfishedN[p,a]*LengthDist[p,a,i]*LengthWeight[i]*Maturity[i];
     }
   }
  }
@@ -143,6 +162,8 @@ matrix DynamicsN(int nCatchYears,
       JBt[1]+=Npat[p,a,1]*LengthDist[p,a,i]*LengthWeight[i]*JVul[i,1];
       ABt[1]+=Npat[p,a,1]*LengthDist[p,a,i]*LengthWeight[i]*AVul[i];
       SSBt[1]+=Npat[p,a,1]*LengthDist[p,a,i]*Maturity[i]*LengthWeight[i]*FemaleProp;
+      TJBt[1]+=Npat[p,a,1]*LengthDist[p,a,i]*LengthWeight[i]*(1.-Maturity[i]);
+      TABt[1]+=Npat[p,a,1]*LengthDist[p,a,i]*LengthWeight[i]*Maturity[i];
     }
   }
   }
@@ -154,6 +175,7 @@ matrix DynamicsN(int nCatchYears,
   ABStatus[1]=ABt[1]/AB0;
   SSBStatus[1]=SSBt[1]/SSB0;
   availBStatus[1]=availBt[1]/availB0;
+  JuvProp[1]=(JBt[1]/(JBt[1]+ABt[1]));
 
   for(t in 2:nyears) {
     
@@ -164,6 +186,12 @@ matrix DynamicsN(int nCatchYears,
     JHt[t-1]=0.;
     AHt[t-1]=0.;
     }
+    
+    if( CatchSepYr>0 && t<=(CatchSepYr+1)) {
+      JHt[t-1]=((JYt[t-1]+AYt[t-1])*JuvProp[t-1])/JBt[t-1];
+      AHt[t-1]=((JYt[t-1]+AYt[t-1])*(1-JuvProp[t-1]))/ABt[t-1];
+    }
+    
   
   for(a in 1:A){
     
@@ -200,6 +228,11 @@ matrix DynamicsN(int nCatchYears,
     
     JBt[t]+=Npat[p,a,t]*LengthDist[p,a,i]*LengthWeight[i]*JVul[i,t];
     ABt[t]+=Npat[p,a,t]*LengthDist[p,a,i]*LengthWeight[i]*AVul[i];
+    
+    TJBt[t]+=Npat[p,a,t]*LengthDist[p,a,i]*LengthWeight[i]*(1-Maturity[i]);
+    TABt[t]+=Npat[p,a,t]*LengthDist[p,a,i]*LengthWeight[i]*(Maturity[i]);
+    
+    
    }
     }
   }
@@ -207,12 +240,12 @@ matrix DynamicsN(int nCatchYears,
   availBt[t]=ABt[t]+JBt[t];
   
   BStatus[t]=Bt[t]/B0;
-  JBStatus[t]=JBt[t]/JB0;
-  ABStatus[t]=ABt[t]/AB0;
+  JBStatus[t]=TJBt[t]/TJB0;
+  ABStatus[t]=TABt[t]/TAB0;
   SSBStatus[t]=SSBt[t]/SSB0;
   availBStatus[t]=availBt[t]/availB0;
-  
-  
+  JuvProp[t]=(JBt[t]/(JBt[t]+ABt[t]));
+
   }
   
   for(t in 1:nyears){
@@ -240,11 +273,18 @@ matrix DynamicsN(int nCatchYears,
     }
   }
   
+  SSBref=mean(SSBt[25:35]);
+  ABref=mean(TABt[25:35]);
+  JBref=mean(TJBt[25:35]);
+  
+  SSBrel=SSBt/SSBref;
+  ABrel=TABt/ABref;
+  JBrel=TJBt/JBref;
   
   
   OutPut[1:A,]=Nat;
-  OutPut[A+1,]=JBt';
-  OutPut[A+2,]=ABt';
+  OutPut[A+1,]=TJBt';
+  OutPut[A+2,]=TABt';
   OutPut[A+3,]=SSBt';
   OutPut[A+4,]=Bt';
   OutPut[A+5,]=BStatus';
@@ -263,6 +303,9 @@ matrix DynamicsN(int nCatchYears,
   OutPut[A+14,]=ACt';
   OutPut[A+15,]=SSBStatus';
   OutPut[A+16,]=availBStatus';
+  OutPut[A+17,]=SSBrel';
+  OutPut[A+18,]=JBrel';
+  OutPut[A+19,]=ABrel';
 
   return OutPut;              
                   

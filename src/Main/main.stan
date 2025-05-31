@@ -14,58 +14,61 @@ functions{
   }
 
 data {
-  int nbins;        // number of length bins
-  int nCatchYears;  // number of years of catch data
-  int A;            // number of age classes
-  int nProj;        // number of projection years
-  int nyears;       // number of years
-  int nplatoons;    // number of platoons
-  int FindBrps;     // find Biological Reference Points?
+  int nbins;
+  int nCatchYears;
+  int A;
+  int nProj;
+  int nyears;
+  int nplatoons;
+  int FindBrps;
   
-  vector[nbins] bins;          // length bins
-  vector[nCatchYears] JYt;     // juvenile catch data
-  vector[nCatchYears] AYt;     // adult catch data
-  vector[nbins] LengthWeight;  // length-weight relationship
-  vector[nbins] Maturity;      // maturity-at-length
-  vector[nyears] Release;      // release numbers
-  vector[nplatoons] Rprop;     // proportion of recruits in each platoon
+  vector[nbins] bins;
+  vector[nCatchYears] JYt;
+  vector[nCatchYears] AYt;
+  vector[nbins] LengthWeight;
+  vector[nbins] Maturity;
+  vector[nyears] Release;
+  vector[nplatoons] Rprop;
   
-  real FemaleProp;             // female proportion
+  real FemaleProp;
   
-  real LrefForM;               // reference length for natural mortality
+  real LrefForM;
   
-  array[nplatoons] matrix[A, nbins] LengthDist;  // length-at-age distribution
+  array[nplatoons] matrix[A, nbins] LengthDist;
   
-  real steepPoint;             // steepness point (default: 0.2)
+  real steepPoint;
   //real gamma;
   
-  real NatExponent;            // length-dependent natural mortality model exponent
+  real NatExponent;
   
   //real L05;
   //real L95;
-  real sigR;                   // recruitment standard deviation
-  real JuvMaxVul;              // maximum juvenile vulnerability
-  real AduMaxVul;              // maximum adult vulnerability
-              
-  real L05_low;                // lower bound of L05
-  real L05_up;                 // upper bound of L05
+  real sigR;
+  real RdevCor;
+  real JuvMaxVul;
+  real AduMaxVul;
   
-  real L95_low;               // lower bound of L95
-  real L95_up;                // upper bound of L95
+  real L05_low;
+  real L05_up;
+  
+  real L95_low;
+  real L95_up;
+  
+  int CatchSepYr;
   
   }
 
 parameters {
   
-  real R0;                     // unfished recruitment
-  real Natural_M;              // natural mortality
-  real steepness;              // steepness
-  real gamma;                  // depensation parameter
-  real L95;                    // length at 95% selectivity
-  real L05;                    // length at 5% selectivity
-  vector[nyears+A-1] Rdev;     // recruitment deviations
-  vector[nyears] L05dev;       // L05 deviations
-  vector[nyears] L95dev;       // L95 deviations
+  real R0;
+  real Natural_M;
+  real steepness;
+  real gamma;
+  real L95;
+  real L05;
+  vector[nyears+A-1] Rdev;
+  vector[nyears] L05dev;
+  vector[nyears] L95dev;
   
   }
   
@@ -104,7 +107,7 @@ generated quantities {
   }
   
   
-  matrix[A+16, nyears] OutPut=DynamicsN(nCatchYears,
+  matrix[A+19, nyears] OutPut=DynamicsN(nCatchYears,
                                         A,
                                         nplatoons,
                                         bins,
@@ -127,12 +130,13 @@ generated quantities {
                                         Release,
                                         Rdev,
                                         Rprop,
-                                        nProj
+                                        nProj,
+                                        CatchSepYr
                                         );
   
   matrix[A, nyears] Nat=OutPut[1:A,];
-  vector[nyears] JBt=OutPut[A+1,]';
-  vector[nyears] ABt=OutPut[A+2,]';
+  vector[nyears] TJBt=OutPut[A+1,]';
+  vector[nyears] TABt=OutPut[A+2,]';
   vector[nyears] SSBt=OutPut[A+3,]';
   vector[nyears] Bt=OutPut[A+4,]';
   vector[nyears] TBStatus=OutPut[A+5,]';
@@ -159,6 +163,11 @@ generated quantities {
   
   vector[nyears] availBStatus=OutPut[A+16,]';
   
+  vector[nyears] SSBrel=OutPut[A+17,]';
+  vector[nyears] JBrel=OutPut[A+18,]';
+  vector[nyears] ABrel=OutPut[A+19,]';
+  
+  
   
   
   //trajectories under 20% or over 40%
@@ -180,4 +189,3 @@ generated quantities {
 
   
   }
-
