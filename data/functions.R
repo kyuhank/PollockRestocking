@@ -243,7 +243,7 @@ PriorPushForwardCheck=function(InputData,
 
     
     ### attach Rdev values ####
-    Rdev=aperm(  replicate(chains, replicate(InputPriorDraws, MASS::mvrnorm(1, mu = rep(0, dim(Sig)[1]), Sigma = Sig))) , c(2,3,1) )
+    Rdev=aperm(  replicate(chains, replicate(InputPriorDraws, MASS::mvrnorm(1, mu = rep(-0.5*sigR^2, dim(Sig)[1]), Sigma = Sig))) , c(2,3,1) )
     L05dev=aperm(  replicate(chains, replicate(InputPriorDraws, MASS::mvrnorm(1, mu = rep(0, dim(SigL05)[1]), Sigma = SigL05))) , c(2,3,1) )
     L95dev=aperm(  replicate(chains, replicate(InputPriorDraws, MASS::mvrnorm(1, mu = rep(0, dim(SigL95)[1]), Sigma = SigL95))) , c(2,3,1) )
     

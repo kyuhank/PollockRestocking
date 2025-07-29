@@ -131,7 +131,7 @@ matrix DynamicsN(int nCatchYears,
     
     if(a==1) {
       for (p in 1:nplatoons) {
-        preN[p,a,j]=Rprop[p]*exp(log(StockRecruitment(R0, steepness, preSSBt[j-1], SSB0, gamma, steepPoint))+Rdev[j-1]-0.5*sigR^2);
+        preN[p,a,j]=Rprop[p]*exp(log(StockRecruitment(R0, steepness, preSSBt[j-1], SSB0, gamma, steepPoint))+Rdev[j-1]);
       }
     } else if (a>1 || a<A) {
       for (p in 1:nplatoons) {
@@ -198,7 +198,7 @@ matrix DynamicsN(int nCatchYears,
     if(a==1){
       
       for (p in 1:nplatoons) {
-      Npat[p,a,t]=exp(log(StockRecruitment(R0, steepness, SSBt[t-1], SSB0, gamma, steepPoint))+Rdev[A+(t-1)]-0.5*sigR^2)*Rprop[p];
+      Npat[p,a,t]=exp(log(StockRecruitment(R0, steepness, SSBt[t-1], SSB0, gamma, steepPoint))+Rdev[A+(t-1)])*Rprop[p];
       if(p==nplatoons) {
       Npat[p,a,t]=Npat[p,a,t]+Release[t];
       }
