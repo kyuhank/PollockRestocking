@@ -245,15 +245,12 @@ PriorPushForwardCheck=function(InputData,
 
     
     ### attach Rdev values ####
-<<<<<<< HEAD:Data_and_functions/functions.R
     #Rdev=aperm( replicate(chains, MASS::mvrnorm(InputPriorDraws, mu = rep(0, dim(Sigma)[1]), Sigma = Sigma), c(2,3,1) ))
     #Rdev=aperm( replicate(chains, replicate(InputPriorDraws, AutoRdev(RdevCor, sigR, nyears+A-1) )), c(2,3,1) )
-=======
     Rdev=aperm(  replicate(chains, replicate(InputPriorDraws, MASS::mvrnorm(1, mu = rep(-0.5*sigR^2, dim(Sig)[1]), Sigma = Sig))) , c(2,3,1) )
     L05dev=aperm(  replicate(chains, replicate(InputPriorDraws, MASS::mvrnorm(1, mu = rep(0, dim(SigL05)[1]), Sigma = SigL05))) , c(2,3,1) )
     L95dev=aperm(  replicate(chains, replicate(InputPriorDraws, MASS::mvrnorm(1, mu = rep(0, dim(SigL95)[1]), Sigma = SigL95))) , c(2,3,1) )
->>>>>>> 75624bdab81366e7ef76bd5316ef91d3e94956f2:data/functions.R
-    
+
     Rdev=aperm(  replicate(chains, replicate(InputPriorDraws, MASS::mvrnorm(1, mu = rep(-0.5*sigR^2, dim(Sig)[1]), Sigma = Sig))) , c(2,3,1) )
     L05dev=aperm(  replicate(chains, replicate(InputPriorDraws, MASS::mvrnorm(1, mu = rep(-0.5*sigL05^2, dim(SigL05)[1]), Sigma = SigL05))) , c(2,3,1) )
     L95dev=aperm(  replicate(chains, replicate(InputPriorDraws, MASS::mvrnorm(1, mu = rep(-0.5*sigL95^2, dim(SigL95)[1]), Sigma = SigL95))) , c(2,3,1) )
