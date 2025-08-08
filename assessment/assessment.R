@@ -89,15 +89,15 @@ cat('\n\n Setup finished \n\n')
 ######################
 ### load functions ###
 ######################
-source("../Data_and_functions/data.R")
-source("../Data_and_functions/functions.R")
+source("Data_and_functions/data.R")
+source("Data_and_functions/functions.R")
 
 #######################
 ## compile the model ##
 #######################
 
 ## simulation model
-SimModel <- cmdstanr::cmdstan_model('../Model/Main/main.stan',
+SimModel <- cmdstanr::cmdstan_model('Model/Main/main.stan',
                                     pedantic=F, 
                                     force_recompile=F)
 

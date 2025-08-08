@@ -13,20 +13,18 @@
 ## Preamble ##
 ##############
 
-setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-
 require(bakeR)
 require(dplyr)
+require(here)
 
-## only local run mode works with this version (original version was designed for gateaux.io)
-LocalRun=T 
+setwd(here())
 
 #####################
 ## sampling option ##
 #####################
 
-nDraws=400
-nChains=30
+nDraws=200
+nChains=10
 minSampleNum=200
 
 #######################################
@@ -107,7 +105,6 @@ parsSensitivity <- lapply(1:nrow(parsComb), function(ll){
                                                   "sigL95"=sigL95,
                                                   "JuvMaxVul"=JuvMaxVul,
                                                   "AduMaxVul"=AduMaxVul
-                                                  #"AdultFraction"=AdultFraction
   )),
   nRelease=as.list(nRelease), ReleaseScenarioNumber=length(nRelease)) )
 })
@@ -118,18 +115,5 @@ names(parsSensitivity) <- paste('RUN',1:length(parsSensitivity), sep='_')
 ################################### run the job (SCRA) ###############################
 ##########################################################################################
 
-if(LocalRun!=1) {
-  
-  if (!exists("JWT")) {
-    stop("API token is not provided")
-  } else {
-    
-    gateaux_job_runner(parsSensitivity,
-                       server = "gateaux.io/api", 
-                       JWT=JWT,
-                       report_name = "PollockRelease-analysis",
-                       log_jobs = F)
-  }
-} else {
-  source("assessment.R")
-}
+source("assessment/assessment.R")
+

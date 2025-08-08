@@ -1,0 +1,1084 @@
+---
+title: "Simulation-Based Model Verification and Performance Validation"
+author: "kyuhan Kim"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::downcute:
+    self_contained: yes
+    thumbnails: false
+    lightbox: true
+    gallery: false
+    highlight: tango
+    code_folding: hide
+    fig_width: 10
+    fig_height: 8
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(dev = "png",
+                      dpi = 160,
+                      echo = F,
+                      cache = F,
+                      warning = F,
+                      message = F)
+
+
+# Load required libraries
+library(cmdstanr)
+library(posterior)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(RColorBrewer)
+library(MASS)
+library(abind)
+library(tibble)
+library(cowplot)
+library(viridis)
+
+# Load custom functions and data
+source('../Data_and_functions/functions.R')
+source('../Data_and_functions/data.R')
+
+theme_set(theme_cowplot())
+
+                   
+```
+
+-------
+
+This document outlines the simulation-based verification and performance testing of a newly developed length-based age-structured model applied to pollock in South Korean waters. This model serves as an **operating model** that generates simulated population dynamics rather than fitting to observed data. The analysis employs forward simulation experiments to serve as both a sanity check for model correctness and comprehensive validation across parameter configurations.
+
+- **Equilibrium Benchmark Testing**: Deterministic simulations verify that the model converges to analytically expected equilibrium states across different parameter combinations, ensuring correct implementation of the underlying population dynamics.
+
+- **Relative Difference Analysis**: Relative differences in abundance time series are computed for pairwise parameter changes ($\gamma$, $\eta$, $\zeta$) to assess model sensitivity and stability across fixed parameter combinations. This analysis identifies how individual parameter changes affect population dynamics.
+
+- **Stochastic Recruitment Analysis**: Recruitment dynamics are tested under different parameter configurations and autocorrelation coefficients of $\rho_R = 0.0$ and $\rho_R = 0.4$ to confirm marginal distribution consistency across models.
+
+-------
+
+## Equilibrium benchmark test
+
+```{r EqBench, echo=FALSE, message=F, warning=FALSE, fig.dim=c(8,8)}
+# Deterministic mode with zero random effects (no MVN sampling)
+
+# Model parameters
+R0_values <- c(5e8, 1e9, 5e9, 1e10)
+steepness_values <- seq(0.25, 0.85, by = 0.2)
+gamma_values <- c(1, 2)
+pmixl_values <- c(0.5, 5)      # η
+natexponent_values <- c(0, -1) # ζ
+
+# Scenario configuration
+scenarios <- expand.grid(
+  gamma = gamma_values,
+  steepness = steepness_values,
+  PmixL = pmixl_values,
+  NatExponent = natexponent_values,
+  R0 = R0_values,
+  sig_R = 0.0,
+  KEEP.OUT.ATTRS = FALSE
+) %>% mutate(
+  scenario_id = paste("gamma", gamma, "h", round(steepness, 2),
+                      "eta", PmixL, "zeta", NatExponent,
+                      "R0", format(R0, scientific = TRUE), sep = "_")
+)
+
+base_config <- list(
+  nyears = 90,
+  catch_separation_year = -1,
+  projection_years = 14,
+  chains = 1,
+  prior_draws = 1,
+  Rdev_correlation = 0.0,
+  L05_range = c(12.5, 12.5),
+  L95_range = c(22.5, 22.5),
+  sig_L05 = 0,
+  sig_L95 = 0,
+  L05dev_correlation = 0,
+  L95dev_correlation = 0,
+  L_nest_diff = 0.0,
+  M_median = 0.22,
+  sig_M = 0
+)
+
+# Convert Stan array output to matrix format
+convert_stan_array_to_matrix <- function(draws_df, var_pattern, dim_names = c("dim1","dim2")) {
+  df <- as.data.frame(draws_df)
+  var_cols <- grep(paste0("^", var_pattern, "\\["), names(df), value = TRUE)
+  if (length(var_cols) == 0) stop(paste("No columns found matching pattern:", var_pattern))
+  res_list <- vector("list", length(var_cols))
+  k <- 1
+  for (cn in var_cols) {
+    m <- stringr::str_match(cn, paste0(var_pattern, "\\[(\\d+),(\\d+)\\]"))
+    if (!is.na(m[1,1])) {
+      res_list[[k]] <- data.frame(
+        dim1 = as.integer(m[1,2]),
+        dim2 = as.integer(m[1,3]),
+        value = df[1, cn]
+      )
+      k <- k + 1
+    }
+  }
+  df_long <- do.call(rbind, res_list)
+  names(df_long)[1:2] <- dim_names
+  wide <- df_long %>%
+    tidyr::pivot_wider(names_from = !!rlang::sym(dim_names[2]), values_from = value) %>%
+    dplyr::arrange(!!rlang::sym(dim_names[1]))
+  mat <- as.matrix(wide[, -1])
+  rownames(mat) <- as.character(wide[[1]])
+  mat
+}
+
+# Age-specific color palette
+create_highly_distinguishable_colors <- function(n_ages) {
+  if (n_ages <= 1) {
+    cols <- "#E31A1C"
+  } else if (n_ages <= 25) {
+    palette25 <- c(
+      "#E31A1C","#1F78B4","#33A02C","#FF7F00","#6A3D9A",
+      "#A6CEE3","#FB9A99","#B2DF8A","#FDBF6F","#CAB2D6",
+      "#FFFF99","#FF1493","#00CED1","#228B22","#FFD700",
+      "#8B008B","#DC143C","#00BFFF","#32CD32","#FF4500",
+      "#9400D3","#00FA9A","#FF69B4","#8B4513","#2E8B57"
+    )
+    cols <- palette25[1:n_ages]
+  } else {
+    cols <- grDevices::rainbow(n_ages, s = 0.8, v = 0.8)
+  }
+  names(cols) <- paste("Age", 1:n_ages)
+  cols
+}
+
+# Execute single scenario simulation
+run_scenario <- function(scenario_params, base_config, sim_model) {
+  config <- modifyList(base_config, as.list(scenario_params))
+  config$R0_range <- c(config$R0, config$R0)
+
+  InputData <- MakeInputObj(PmixL = config$PmixL)
+  InputData$nyears <- config$nyears
+  InputData$gamma <- config$gamma
+  InputData$CatchSepYr <- config$catch_separation_year
+  InputData$steepness <- config$steepness
+  InputData$NatExponent <- config$NatExponent
+  InputData$Release <- rep(0, config$nyears)
+  InputData$nCatchYears <- config$nyears - config$projection_years
+
+  n_hist <- length(InputData$AYt)
+  n_ext <- config$nyears - n_hist - config$projection_years
+  if (n_ext > 0) {
+    InputData$AYt <- c(InputData$AYt, rep(0, n_ext))
+    InputData$JYt <- c(InputData$JYt, rep(0, n_ext))
+  }
+
+  A <- InputData$A
+
+  # Main parameters (deterministic)
+  InputPrior <- posterior::draws_array(
+    "R0"        = replicate(config$chains, rep(config$R0, config$prior_draws)),
+    "Natural_M" = replicate(config$chains, rep(config$M_median, config$prior_draws)),
+    "steepness" = replicate(config$chains, rep(config$steepness, config$prior_draws)),
+    "gamma"     = replicate(config$chains, rep(config$gamma, config$prior_draws)),
+    "L95"       = replicate(config$chains, rep(base_config$L95_range[1], config$prior_draws)),
+    "L05"       = replicate(config$chains, rep(base_config$L05_range[1], config$prior_draws)),
+    .nchains = config$chains
+  )
+
+  # Zero random deviations (no MVN sampling, just zeros)
+  Rdev   <- array(0, dim = c(config$prior_draws, config$chains, config$nyears + A - 1))
+  L05dev <- array(0, dim = c(config$prior_draws, config$chains, config$nyears))
+  L95dev <- array(0, dim = c(config$prior_draws, config$chains, config$nyears))
+
+  dimnames(Rdev)[[3]]   <- paste("Rdev[",   1:(config$nyears + A - 1), "]", sep = '')
+  dimnames(L05dev)[[3]] <- paste("L05dev[", 1:config$nyears,           "]", sep = '')
+  dimnames(L95dev)[[3]] <- paste("L95dev[", 1:config$nyears,           "]", sep = '')
+
+  InputPrior <- posterior::as_draws(abind::abind(InputPrior, Rdev))
+  InputPrior <- posterior::as_draws(abind::abind(InputPrior, L05dev))
+  InputPrior <- posterior::as_draws(abind::abind(InputPrior, L95dev))
+
+invisible(capture.output({  out <- tryCatch({
+    sim <- sim_model$generate_quantities(
+      data = InputData, fitted_params = InputPrior, parallel_chains = dim(InputPrior)[2]
+    )
+    Nat_draws  <- posterior::as_draws_df(sim$draws("Nat"))
+    unfN_draws <- posterior::as_draws_df(sim$draws("unfishedN"))
+
+    Nat_mat <- convert_stan_array_to_matrix(Nat_draws, "Nat", c("age","time"))
+    unfishedN_mat <- convert_stan_array_to_matrix(unfN_draws, "unfishedN", c("age","platoon"))
+    list(
+      success = TRUE,
+      Nat_mat = Nat_mat,
+      unfishedN_mat = unfishedN_mat,
+      equilibrium_abundance = apply(unfishedN_mat, 2, sum),
+      gamma = config$gamma,
+      steepness = config$steepness,
+      PmixL = config$PmixL,
+      NatExponent = config$NatExponent,
+      R0 = config$R0
+    )
+  }, error = function(e) {
+    list(success = FALSE, error_message = e$message,
+         gamma = config$gamma, steepness = config$steepness,
+         PmixL = config$PmixL, NatExponent = config$NatExponent, R0 = config$R0)
+  }) }))
+  
+  
+  out
+}
+
+# Model compilation and execution
+SimModel <- cmdstanr::cmdstan_model('../Model/Main/main.stan', pedantic = FALSE, force_recompile = FALSE)
+
+results <- vector("list", nrow(scenarios))
+for (i in seq_len(nrow(scenarios))) {
+  results[[i]] <- run_scenario(scenarios[i, ], base_config, SimModel)
+  results[[i]]$scenario_info <- scenarios[i, ]
+}
+
+# Data processing for visualization
+all_age_data <- data.frame()
+for (i in seq_along(results)) {
+  res <- results[[i]]
+  if (!isTRUE(res$success)) next
+  n_ages_plot <- nrow(res$Nat_mat)
+  years <- 1946 + seq_len(ncol(res$Nat_mat)) - 1
+
+  for (age_idx in 1:n_ages_plot) {
+    abundance_sim <- res$Nat_mat[age_idx, ]
+    equilibrium_val <- res$equilibrium_abundance[age_idx]
+    age_label <- if (age_idx == 9) "Age 9+" else paste("Age", age_idx)
+
+    age_data <- data.frame(
+      year = years,
+      simulation = abundance_sim,
+      equilibrium = equilibrium_val,
+      age = age_label,
+      gamma_val = res$gamma,
+      steepness_val = res$steepness,
+      PmixL_val = res$PmixL,
+      NatExp_val = res$NatExponent,
+      R0_val = res$R0,
+      age_num = age_idx
+    )
+    all_age_data <- rbind(all_age_data, age_data)
+  }
+}
+
+# Scale to billion individuals
+to_billion <- function(x) x / 1e9
+all_age_data <- all_age_data %>%
+  mutate(
+    simulation_bil = to_billion(simulation),
+    equilibrium_bil = to_billion(equilibrium)
+  )
+
+# Configure age factors and colors
+age_levels_num <- sort(unique(all_age_data$age_num))
+age_labels_all <- ifelse(age_levels_num == 9, "Age 9+", paste("Age", age_levels_num))
+all_age_data <- all_age_data %>% mutate(age = factor(age, levels = age_labels_all))
+n_levels <- length(age_labels_all)
+age_colors_vec <- create_highly_distinguishable_colors(n_levels)
+names(age_colors_vec) <- age_labels_all
+
+# Plot generation function
+create_R0_specific_plot <- function(r0_value, data, age_colors_map, r0_digits = 2) {
+  subset_data <- data[data$R0_val == r0_value, ]
+  if (nrow(subset_data) == 0) return(NULL)
+
+  subset_data$model_label_r0 <- paste(
+    paste0("γ=", subset_data$gamma_val),
+    paste0("η=", subset_data$PmixL_val),
+    paste0("ζ=", subset_data$NatExp_val),
+    sep = ", "
+  )
+  subset_data$steepness_label_r0 <- paste0("h=", sprintf("%.2f", subset_data$steepness_val))
+
+  gamma_levels <- paste0("γ=", sort(unique(subset_data$gamma_val)))
+  eta_levels   <- paste0("η=", sort(unique(subset_data$PmixL_val)))
+  zeta_levels  <- paste0("ζ=", sort(unique(subset_data$NatExp_val)))
+  h_levels     <- paste0("h=", sprintf("%.2f", sort(unique(subset_data$steepness_val))))
+
+  model_levels_r0 <- c()
+  for (g in gamma_levels) for (e in eta_levels) for (z in zeta_levels) {
+    model_levels_r0 <- c(model_levels_r0, paste(g, e, z, sep = ", "))
+  }
+
+  subset_data$model_factor_r0 <- factor(subset_data$model_label_r0, levels = model_levels_r0)
+  subset_data$steepness_factor_r0 <- factor(subset_data$steepness_label_r0, levels = h_levels)
+
+  # R0 in billions for title
+  r0_bil <- r0_value / 1e9
+  s <- sprintf("%.1f", r0_bil)
+  r0_title_val <- sub("\\.0$", "", s)
+
+  ggplot(subset_data, aes(x = year, color = age)) +
+    geom_line(aes(y = simulation_bil), size = 0.8) +
+    geom_line(aes(y = equilibrium_bil), linetype = "dashed", size = 0.6) +
+    facet_grid(model_factor_r0 ~ steepness_factor_r0, scales = "free_y") +
+    scale_color_manual(values = age_colors_map, name = "Age", drop = FALSE) +
+    labs(
+      title = bquote(R[0] == .(r0_title_val) ~ "billion"),
+      x = "Year",
+      y = "Abundance (billion individuals)"
+    ) +
+    theme(
+      text = element_text(size = 9),
+      axis.title = element_text(size = 11),
+      legend.title = element_text(size = 9),
+      legend.position = "right",
+      strip.text.x.top = element_text(size = 10),
+      strip.text.y.right = element_text(size = 7.5),
+      axis.text = element_text(size = 9.5),
+      title = element_text(size = 11)
+    )
+}
+
+# Generate plots
+unique_R0_values <- sort(unique(all_age_data$R0_val))
+R0_plots <- vector("list", length(unique_R0_values))
+names(R0_plots) <- paste0("R0_", formatC(unique_R0_values, format = "e", digits = 0))
+
+for (i in seq_along(unique_R0_values)) {
+  r0_val <- unique_R0_values[i]
+  p <- create_R0_specific_plot(r0_val, all_age_data, age_colors_vec, r0_digits = 2)
+  R0_plots[[i]] <- p
+  if (!is.null(p)) print(p)
+}
+
+```
+
+
+## Relative difference time series for fixed pairs
+
+```{r RelDiff, echo=FALSE, message=F, fig.dim=c(8,8)}
+
+# Scenario grid
+scenarios <- expand.grid(
+  gamma = gamma_values,
+  steepness = steepness_values,
+  PmixL = pmixl_values,
+  NatExponent = natexponent_values,
+  R0 = R0_values,
+  sig_R = 0.0,
+  KEEP.OUT.ATTRS = FALSE
+) %>%
+  mutate(
+    scenario_id = paste("gamma", gamma, "steepness", round(steepness, 2),
+                        "PmixL", PmixL, "NatExp", NatExponent,
+                        "R0", format(R0, scientific = TRUE), sep = "_"),
+    scenario_name = paste0("γ=", gamma, ", h=", round(steepness, 2),
+                           ", η=", PmixL, ", ζ=", NatExponent,
+                           ", R0=", format(R0, scientific = TRUE))
+  )
+
+
+# Helper functions
+convert_stan_array_to_matrix <- function(draws_df, var_pattern, dim_names = c("dim1", "dim2")) {
+  df <- as.data.frame(draws_df)
+  var_cols <- grep(paste0("^", var_pattern, "\\["), names(df), value = TRUE)
+  if (length(var_cols) == 0) stop(paste("No columns found for pattern:", var_pattern))
+  result_list <- vector("list", length(var_cols)); idx <- 1
+  for (cn in var_cols) {
+    matches <- stringr::str_match(cn, paste0(var_pattern, "\\[(\\d+),(\\d+)\\]"))
+    if (!is.na(matches[1,1])) {
+      result_list[[idx]] <- data.frame(dim1 = as.integer(matches[1,2]),
+                                       dim2 = as.integer(matches[1,3]),
+                                       value = df[1, cn])
+      idx <- idx + 1
+    }
+  }
+  df_long <- do.call(rbind, result_list); names(df_long)[1:2] <- dim_names
+  result_wide <- df_long %>%
+    tidyr::pivot_wider(names_from = !!rlang::sym(dim_names[2]), values_from = value) %>%
+    dplyr::arrange(!!rlang::sym(dim_names[1]))
+  mat <- as.matrix(result_wide[, -1]); rownames(mat) <- as.character(result_wide[[1]]); mat
+}
+
+create_highly_distinguishable_colors <- function(n_ages) {
+  if (n_ages <= 1) cols <- "#E31A1C"
+  else if (n_ages <= 25) {
+    cols <- c("#E31A1C","#1F78B4","#33A02C","#FF7F00","#6A3D9A","#A6CEE3","#FB9A99",
+              "#B2DF8A","#FDBF6F","#CAB2D6","#FFFF99","#FF1493","#00CED1","#228B22",
+              "#FFD700","#8B008B","#DC143C","#00BFFF","#32CD32","#FF4500","#9400D3",
+              "#00FA9A","#FF69B4","#8B4513","#2E8B57")[1:n_ages]
+  } else cols <- grDevices::rainbow(n_ages, s=0.8, v=0.8)
+  names(cols) <- paste("Age", 1:n_ages); cols
+}
+
+safe_rel_diff <- function(comp, base) {
+  (comp - base) / (ifelse(abs(base) < 1e-12, 1e-12, base)) * 100
+}
+
+# Simulation function with zero random effects
+run_scenario <- function(scenario_params, base_config, sim_model) {
+  config <- modifyList(base_config, as.list(scenario_params))
+  config$R0_range <- c(config$R0, config$R0)
+
+  InputData <- MakeInputObj(PmixL = config$PmixL)
+  InputData$nyears <- config$nyears
+  InputData$gamma <- config$gamma
+  InputData$CatchSepYr <- config$catch_separation_year
+  InputData$steepness <- config$steepness
+  InputData$NatExponent <- config$NatExponent
+  InputData$Release <- rep(0, config$nyears)
+  InputData$nCatchYears <- config$nyears - config$projection_years
+
+  n_hist <- length(InputData$AYt)
+  n_ext <- config$nyears - n_hist - config$projection_years
+  InputData$AYt <- c(InputData$AYt, rep(0, n_ext))
+  InputData$JYt <- c(InputData$JYt, rep(0, n_ext))
+
+  A <- InputData$A
+
+  # Main parameters (deterministic)
+  InputPrior <- posterior::draws_array(
+    "R0"       = replicate(config$chains, rep(config$R0, config$prior_draws)),
+    "Natural_M"= replicate(config$chains, rep(config$M_median, config$prior_draws)),
+    "steepness"= replicate(config$chains, rep(config$steepness, config$prior_draws)),
+    "gamma"    = replicate(config$chains, rep(config$gamma, config$prior_draws)),
+    "L95"      = replicate(config$chains, rep(config$L95_range[1], config$prior_draws)),
+    "L05"      = replicate(config$chains, rep(config$L05_range[1], config$prior_draws)),
+    .nchains = config$chains
+  )
+
+  # Zero random deviations (no MVN sampling)
+  Rdev   <- array(0, dim = c(config$prior_draws, config$chains, config$nyears + A - 1))
+  L05dev <- array(0, dim = c(config$prior_draws, config$chains, config$nyears))
+  L95dev <- array(0, dim = c(config$prior_draws, config$chains, config$nyears))
+
+  dimnames(Rdev)[[3]]   <- paste0("Rdev[",   1:(config$nyears + A - 1), "]")
+  dimnames(L05dev)[[3]] <- paste0("L05dev[", 1:config$nyears, "]")
+  dimnames(L95dev)[[3]] <- paste0("L95dev[", 1:config$nyears, "]")
+
+  InputPrior <- posterior::as_draws(abind::abind(InputPrior, Rdev))
+  InputPrior <- posterior::as_draws(abind::abind(InputPrior, L05dev))
+  InputPrior <- posterior::as_draws(abind::abind(InputPrior, L95dev))
+
+tryCatch({
+    sim <- sim_model$generate_quantities(
+      data = InputData, fitted_params = InputPrior, parallel_chains = dim(InputPrior)[2]
+    )
+    Nat_draws      <- posterior::as_draws_df(sim$draws("Nat"))
+    unfishedN_draws<- posterior::as_draws_df(sim$draws("unfishedN"))
+
+    Nat_mat        <- convert_stan_array_to_matrix(Nat_draws, "Nat", c("age", "time"))
+    unfishedN_mat  <- convert_stan_array_to_matrix(unfishedN_draws, "unfishedN", c("age", "platoon"))
+
+    list(
+      Nat_mat = Nat_mat,
+      unfishedN_mat = unfishedN_mat,
+      equilibrium_abundance = apply(unfishedN_mat, 2, sum),
+      gamma = config$gamma,
+      steepness = config$steepness,
+      PmixL = config$PmixL,
+      NatExponent = config$NatExponent,
+      R0 = config$R0,
+      success = TRUE
+    )
+  }, error = function(e) {
+    cat("Simulation error:", e$message, "\n")
+    list(success = FALSE, error_message = e$message,
+         gamma = config$gamma, steepness = config$steepness,
+         PmixL = config$PmixL, NatExponent = config$NatExponent, R0 = config$R0)
+  })
+}
+
+# Model compilation and simulation execution
+SimModel <- cmdstanr::cmdstan_model('../Model/Main/main.stan', pedantic = FALSE, force_recompile = FALSE)
+
+results <- vector("list", nrow(scenarios)); ok <- 0L
+
+invisible(capture.output({
+for (i in seq_len(nrow(scenarios))) {
+  res <- run_scenario(scenarios[i, ], base_config, SimModel)
+  res$scenario_info <- scenarios[i, ]
+  results[[i]] <- res
+  if (res$success) ok <- ok + 1L
+}
+}))
+
+# Collect time series data
+all_age_data <- data.frame()
+for (i in seq_along(results)) {
+  res <- results[[i]]; if (!res$success) next
+  n_ages <- nrow(res$Nat_mat)
+  years <- 1946 + seq_len(ncol(res$Nat_mat)) - 1  # Calendar years starting 1946
+  for (age_idx in 1:n_ages) {
+    age_label <- if (age_idx == 9) "Age 9+" else paste("Age", age_idx)
+    all_age_data <- rbind(all_age_data, data.frame(
+      time = 1:ncol(res$Nat_mat),
+      year = years,
+      simulation = res$Nat_mat[age_idx, ],
+      equilibrium = res$equilibrium_abundance[age_idx],
+      age = age_label,
+      age_num = age_idx,
+      gamma_val = res$gamma,
+      steepness_val = res$steepness,
+      PmixL_val = res$PmixL,
+      NatExp_val = res$NatExponent,
+      R0_val = res$R0
+    ))
+  }
+}
+
+stopifnot(nrow(all_age_data) > 0)
+
+# Configure age factors and colors with "Age 9+"
+age_levels_num <- sort(unique(all_age_data$age_num))
+age_labels_all <- ifelse(age_levels_num == 9, "Age 9+", paste("Age", age_levels_num))
+all_age_data <- all_age_data %>% mutate(age = factor(age, levels = age_labels_all))
+n_levels <- length(age_labels_all)
+age_colors_vec <- create_highly_distinguishable_colors(n_levels)
+names(age_colors_vec) <- age_labels_all
+
+# Pairwise comparison collection function
+collect_all_pairs_for_var <- function(block, var_name, pair_vals) {
+  combos <- block %>% distinct(gamma_val, PmixL_val, NatExp_val)
+  other_vars <- setdiff(c("gamma_val","PmixL_val","NatExp_val"), paste0(var_name,"_val"))
+  out_list <- list(); k <- 1
+
+  for (v1 in sort(unique(combos[[other_vars[1]]]))) {
+    for (v2 in sort(unique(combos[[other_vars[2]]]))) {
+      if (var_name == "gamma") {
+        base_df <- block %>% filter(gamma_val == pair_vals[1],
+                                    !!sym(other_vars[1]) == v1,
+                                    !!sym(other_vars[2]) == v2)
+        comp_df <- block %>% filter(gamma_val == pair_vals[2],
+                                    !!sym(other_vars[1]) == v1,
+                                    !!sym(other_vars[2]) == v2)
+        pair_label <- sprintf("γ: %g→%g | η=%g, ζ=%g", pair_vals[1], pair_vals[2],
+                              ifelse(other_vars[1]=="PmixL_val", v1, v2),
+                              ifelse(other_vars[1]=="NatExp_val"||other_vars[2]=="NatExp_val",
+                                     ifelse(other_vars[1]=="NatExp_val", v1, v2), NA))
+      } else if (var_name == "PmixL") {
+        base_df <- block %>% filter(PmixL_val == pair_vals[1],
+                                    !!sym(other_vars[1]) == v1,
+                                    !!sym(other_vars[2]) == v2)
+        comp_df <- block %>% filter(PmixL_val == pair_vals[2],
+                                    !!sym(other_vars[1]) == v1,
+                                    !!sym(other_vars[2]) == v2)
+        pair_label <- sprintf("η: %g→%g | γ=%g, ζ=%g", pair_vals[1], pair_vals[2],
+                              ifelse(other_vars[1]=="gamma_val", v1, v2),
+                              ifelse(other_vars[1]=="NatExp_val"||other_vars[2]=="NatExp_val",
+                                     ifelse(other_vars[1]=="NatExp_val", v1, v2), NA))
+      } else {
+        base_df <- block %>% filter(NatExp_val == pair_vals[1],
+                                    !!sym(other_vars[1]) == v1,
+                                    !!sym(other_vars[2]) == v2)
+        comp_df <- block %>% filter(NatExp_val == pair_vals[2],
+                                    !!sym(other_vars[1]) == v1,
+                                    !!sym(other_vars[2]) == v2)
+        pair_label <- sprintf("ζ: %g→%g | γ=%g, η=%g", pair_vals[1], pair_vals[2],
+                              ifelse(other_vars[1]=="gamma_val", v1, v2),
+                              ifelse(other_vars[1]=="PmixL_val"||other_vars[2]=="PmixL_val",
+                                     ifelse(other_vars[1]=="PmixL_val", v1, v2), NA))
+      }
+
+      if (nrow(base_df) == 0 || nrow(comp_df) == 0) next
+
+      for (age_i in sort(unique(base_df$age_num))) {
+        b <- base_df[base_df$age_num == age_i, ]
+        c <- comp_df[comp_df$age_num == age_i, ]
+        if (nrow(b) == 0 || nrow(c) == 0) next
+        common_t <- intersect(b$time, c$time)
+        b <- b[b$time %in% common_t, ]; c <- c[c$time %in% common_t, ]
+        if (nrow(b) == 0) next
+        out_list[[k]] <- data.frame(
+          time = b$time,
+          year = 1946 + b$time - 1,
+          rel_diff = safe_rel_diff(c$simulation, b$simulation),
+          age = factor(b$age, levels = age_labels_all),
+          age_num = age_i,
+          pair_label = pair_label
+        ); k <- k + 1
+      }
+    }
+  }
+  if (length(out_list) == 0) return(NULL)
+  bind_rows(out_list)
+}
+
+# R0 formatting function (billion units)
+format_R0_human_billion <- function(r0) {
+  r0_bil <- r0 / 1e9
+  s <- sprintf("%.1f", r0_bil)
+  s <- sub("\\.0$", "", s)
+  paste0(s, " billion")
+}
+
+# Combined plotting function with publication-style formatting
+plot_combined_all_fixed_pairs <- function(all_age_data, age_colors_map) {
+  R0s <- sort(unique(all_age_data$R0_val))
+  hs_all <- sort(unique(all_age_data$steepness_val))
+  h_labs <- paste0("h=", sprintf("%.2f", hs_all))
+
+  for (r0 in R0s) {
+    r0_lab <- format_R0_human_billion(r0)
+
+    # γ 1→2 comparison across all η,ζ combinations
+    g_all <- list()
+    for (h in hs_all) {
+      block <- all_age_data %>% filter(R0_val == r0, steepness_val == h)
+      tmp <- collect_all_pairs_for_var(block, "gamma", c(1,2))
+      if (!is.null(tmp)) { tmp$h <- paste0("h=", sprintf("%.2f", h)); g_all[[length(g_all)+1]] <- tmp }
+    }
+    if (length(g_all) > 0) {
+      dg <- bind_rows(g_all)
+      dg$pair_factor <- factor(dg$pair_label, levels = unique(dg$pair_label))
+      dg$h_factor <- factor(dg$h, levels = h_labs)
+      p_g <- ggplot(dg, aes(year, rel_diff, color=age)) +
+        geom_hline(yintercept=0, linetype="dashed", color="black", alpha=0.6) +
+        geom_line(size=0.9, alpha=0.95) +
+        facet_grid(pair_factor ~ h_factor, scales="free_y") +
+        scale_color_manual(values=age_colors_map, name="Age", drop = FALSE) +
+        labs(
+          title = bquote("γ 1→2 | " * R[0] * " = " * .(r0_lab))
+        ) +
+        xlab("Year") + ylab("Relative difference (%)") +
+        theme(
+          panel.border = element_rect(colour="black", fill=NA, linewidth=0.4),
+          strip.text = element_text(size=10),
+          legend.title = element_text(size=9),
+          axis.text = element_text(size=9),
+          legend.text = element_text(size=8),
+          title = element_text(size = 11)
+        )
+      print(p_g)
+    }
+
+    # η 0.5→5 comparison across all γ,ζ combinations
+    p_all <- list()
+    for (h in hs_all) {
+      block <- all_age_data %>% filter(R0_val == r0, steepness_val == h)
+      tmp <- collect_all_pairs_for_var(block, "PmixL", c(0.5,5))
+      if (!is.null(tmp)) { tmp$h <- paste0("h=", sprintf("%.2f", h)); p_all[[length(p_all)+1]] <- tmp }
+    }
+    if (length(p_all) > 0) {
+      dp <- bind_rows(p_all)
+      dp$pair_factor <- factor(dp$pair_label, levels = unique(dp$pair_label))
+      dp$h_factor <- factor(dp$h, levels = h_labs)
+      p_p <- ggplot(dp, aes(year, rel_diff, color=age)) +
+        geom_hline(yintercept=0, linetype="dashed", color="black", alpha=0.6) +
+        geom_line(size=0.9, alpha=0.95) +
+        facet_grid(pair_factor ~ h_factor, scales="free_y") +
+        scale_color_manual(values=age_colors_map, name="Age", drop = FALSE) +
+        labs(
+          title = bquote("η 0.5→5 | " * R[0] * " = " * .(r0_lab))
+        ) +
+        xlab("Year") + ylab("Relative difference (%)") +
+        theme(
+          panel.border = element_rect(colour="black", fill=NA, linewidth=0.4),
+          strip.text = element_text(size=10),
+          legend.title = element_text(size=9),
+          axis.text = element_text(size=9),
+          legend.text = element_text(size=8),
+          title = element_text(size = 11)
+        )
+      print(p_p)
+    }
+
+    # ζ 0→-1 comparison across all γ,η combinations
+    m_all <- list()
+    for (h in hs_all) {
+      block <- all_age_data %>% filter(R0_val == r0, steepness_val == h)
+      tmp <- collect_all_pairs_for_var(block, "NatExp", c(0,-1))
+      if (!is.null(tmp)) { tmp$h <- paste0("h=", sprintf("%.2f", h)); m_all[[length(m_all)+1]] <- tmp }
+    }
+    if (length(m_all) > 0) {
+      dm <- bind_rows(m_all)
+      dm$pair_factor <- factor(dm$pair_label, levels = unique(dm$pair_label))
+      dm$h_factor <- factor(dm$h, levels = h_labs)
+      p_m <- ggplot(dm, aes(year, rel_diff, color=age)) +
+        geom_hline(yintercept=0, linetype="dashed", color="black", alpha=0.6) +
+        geom_line(size=0.9, alpha=0.95) +
+        facet_grid(pair_factor ~ h_factor, scales="free_y") +
+        scale_color_manual(values=age_colors_map, name="Age", drop = FALSE) +
+        labs(
+          title = bquote("ζ 0→-1 | " * R[0] * " = " * .(r0_lab))
+        ) +
+        xlab("Year") + ylab("Relative difference (%)") +
+        theme(
+          panel.border = element_rect(colour="black", fill=NA, linewidth=0.4),
+          strip.text = element_text(size=10),
+          axis.text = element_text(size=9),
+          legend.title = element_text(size=9),
+          legend.text = element_text(size=8),
+          title = element_text(size = 11)
+        )
+      print(p_m)
+    }
+  }
+}
+
+# Execute combined plotting for all R0 values
+plot_combined_all_fixed_pairs(all_age_data, age_colors_vec)
+
+```
+
+
+## Recruitment deviations and relative recruitment size
+
+```{r RecDev, echo=FALSE, message=F, warning=FALSE,  fig.dim=c(10,10)}
+# Two-panel plot: recruitment deviations and relative recruitment size
+# Corrected version with error handling and debugging
+
+set.seed(33)
+
+# Model parameters
+gamma_vec        <- c(1, 2)       # γ
+natexponent_vec  <- c(0, -1)      # ζ
+pmixL_vec        <- c(0.5, 5)     # η
+rho_levels_chr   <- c("0.0", "0.4")   # ρR correlation levels
+
+nyears <- 90
+chains <- 10
+InputPriorDraws <- 100 
+
+R0_fixed <- 1e10
+Mmedian <- 0.22; sigM <- 0
+sigR <- 1; sigL05 <- 0; sigL95 <- 0
+L05_min <- 12.5; L05_max <- 12.5
+L95_min <- 22.5; L95_max <- 22.5
+year_start <- 1946
+
+# Model compilation
+SimModel <- cmdstan_model('../Model/Main/main.stan', pedantic = FALSE)
+
+# Helper functions
+key_chr <- function(x) sprintf("%.1f", as.numeric(x))
+empty_col_labeller <- function(x) rep("", length(x))
+
+# Facet labels for mathematical expressions
+rho_facet_labels <- c(
+  "0.0" = "rho[R]==0.0",
+  "0.4" = "rho[R]==0.4"
+)
+
+theme_left_y_only <- ggplot2::theme(
+  axis.title.y.right = ggplot2::element_blank(),
+  axis.text.y.right  = ggplot2::element_blank(),
+  axis.ticks.y.right = ggplot2::element_blank()
+)
+
+ensure_panel_levels <- function(df, rho_levels_chr) {
+  if (is.null(df) || nrow(df) == 0) return(df)
+  present <- unique(as.character(df$rho_R))
+  missing_levels <- setdiff(rho_levels_chr, present)
+  if (length(missing_levels) == 0) return(df)
+  yrs <- sort(unique(df$year))
+  if (length(yrs) == 0) return(df)
+  if (!"row_lab" %in% names(df)) df$row_lab <- NA_character_
+  rl <- df$row_lab[1]
+  filler <- lapply(missing_levels, function(lev) {
+    data.frame(
+      year = yrs, mean = NA, lower = NA, upper = NA, q10 = NA, q90 = NA,
+      RecCorr = as.numeric(lev), RecCorr_chr = lev, rho_R = factor(lev, levels = rho_levels_chr),
+      row_lab = rl
+    )
+  })
+  dplyr::bind_rows(df, dplyr::bind_rows(filler))
+}
+
+# Pre-generate standard normal draws for efficiency
+A_ref    <- MakeInputObj(PmixL = 1)$A
+Rdev_z   <- array(rnorm(InputPriorDraws * chains * (nyears + A_ref - 1)),
+                  dim = c(InputPriorDraws, chains, nyears + A_ref - 1))
+L05dev_z <- array(rnorm(InputPriorDraws * chains * nyears),
+                  dim = c(InputPriorDraws, chains, nyears))
+L95dev_z <- array(rnorm(InputPriorDraws * chains * nyears),
+                  dim = c(InputPriorDraws, chains, nyears))
+
+# Main simulation loop with debugging
+result_summary_list <- list()
+rdev_demo_long_all  <- list()
+facet_record <- 1L
+first_A <- NULL
+success_count <- 0
+
+invisible(capture.output({
+for (gamma_val in gamma_vec) {
+  for (natexponent_val in natexponent_vec) {
+    for (pmixL_val in pmixL_vec) {
+
+      InputData <- MakeInputObj(PmixL = pmixL_val)
+      InputData$nyears      <- nyears
+      InputData$gamma       <- gamma_val
+      InputData$CatchSepYr  <- -1
+      InputData$JYt         <- rep(0, length(InputData$JYt))
+      InputData$AYt         <- rep(0, length(InputData$AYt))
+      InputData$steepness   <- 0.6
+      InputData$NatExponent <- natexponent_val
+      A <- InputData$A
+      if (is.null(first_A)) first_A <- A
+
+      sim_list <- list()
+
+      for (rdevcor in as.numeric(rho_levels_chr)) {
+        lbl <- key_chr(rdevcor)
+
+        # AR1 covariance matrix and Cholesky decomposition
+        Sig      <- MvnSigmaAR1(sig = sigR, rho = rdevcor, dim = nyears + A - 1)
+        chol_Sig <- chol(Sig)
+
+        # Prior parameters
+        InputPrior <- posterior::draws_array(
+          "R0"         = replicate(chains, rep(R0_fixed, InputPriorDraws)),
+          "Natural_M"  = replicate(chains, exp(rnorm(InputPriorDraws, log(Mmedian), sigM))),
+          "steepness"  = replicate(chains, rep(InputData$steepness, InputPriorDraws)),
+          "gamma"      = replicate(chains, rep(gamma_val, InputPriorDraws)),
+          "L95"        = replicate(chains, runif(InputPriorDraws, L95_min, L95_max)),
+          "L05"        = replicate(chains, runif(InputPriorDraws, L05_min, L05_max)),
+          .nchains = chains
+        )
+
+        # Generate correlated recruitment deviations
+        Rdev <- array(NA, dim = c(InputPriorDraws, chains, nyears + A - 1))
+        for (c in 1:chains) for (i in 1:InputPriorDraws) {
+          z <- Rdev_z[i, c, 1:(nyears + A - 1)]
+          Rdev[i, c, ] <- as.vector(-0.5 * sigR^2 + t(chol_Sig) %*% z)
+        }
+        dimnames(Rdev)[[3]] <- paste0("Rdev[", 1:(nyears + A - 1), "]")
+        InputPrior <- posterior::as_draws(abind::abind(InputPrior, Rdev, along = 3))
+
+        # Length deviations (deterministic, zero)
+        L05dev <- array(0, dim = c(InputPriorDraws, chains, nyears))
+        dimnames(L05dev)[[3]] <- paste0("L05dev[", 1:nyears, "]")
+        InputPrior <- posterior::as_draws(abind::abind(InputPrior, L05dev, along = 3))
+        L95dev <- array(0, dim = c(InputPriorDraws, chains, nyears))
+        dimnames(L95dev)[[3]] <- paste0("L95dev[", 1:nyears, "]")
+        InputPrior <- posterior::as_draws(abind::abind(InputPrior, L95dev, along = 3))
+
+        # Generate quantities (FIXED: removed extra 's' before SimModel)
+        sim <- tryCatch(
+          {
+            s <- SimModel$generate_quantities(
+              data = InputData, fitted_params = InputPrior, parallel_chains = chains
+            )
+            if (!is.null(s) && is.function(s$draws)) {
+              success_count <- success_count + 1
+              s
+            } else NULL
+          },
+          error = function(e) {
+            cat("Error in scenario γ =", gamma_val, ", ζ =", natexponent_val, 
+                ", η =", pmixL_val, ", ρ =", rdevcor, ":", e$message, "\n")
+            NULL
+          }
+        )
+        sim_list[[lbl]] <- sim
+
+        # Extract sample recruitment deviation paths for visualization
+        if (!is.null(sim)) {
+          nd <- min(3, InputPriorDraws)
+          pri_mat <- posterior::as_draws_matrix(InputPrior)
+          rdev_cols <- grep("^Rdev\\[", colnames(pri_mat), value = TRUE)
+          if (length(rdev_cols) == (nyears + A - 1)) {
+            ex <- pri_mat[1:nd, rdev_cols, drop = FALSE]
+            rdev_long <- as.data.frame(ex) %>%
+              dplyr::mutate(sample_id = paste0("R", seq_len(nd))) %>%
+              tidyr::pivot_longer(-sample_id, names_to = "var", values_to = "Rdev") %>%
+              dplyr::mutate(
+                k = as.integer(gsub("Rdev\\[|\\]", "", var)),
+                year = year_start + (k - (A - 1)) - 1
+              ) %>%
+              dplyr::filter(year >= year_start, year < year_start + nyears) %>%
+              dplyr::select(year, Rdev, sample_id) %>%
+              dplyr::mutate(rho_R = factor(lbl, levels = rho_levels_chr))
+            rdev_demo_long_all[[length(rdev_demo_long_all) + 1]] <- rdev_long
+          }
+        }
+      }
+
+      # Process age-1 recruitment relative to R0
+      make_nat_draws_long <- function(sim, RecCorr_label) {
+        if (is.null(sim) || !is.function(sim$draws)) return(NULL)
+        nat_draws <- posterior::as_draws_matrix(sim$draws("Nat"))
+        age1_vars <- grep("^Nat\\[1,", colnames(nat_draws), value = TRUE)
+        if (length(age1_vars) == 0) return(NULL)
+        age1_mat  <- nat_draws[, age1_vars, drop = FALSE] / R0_fixed
+        nat_df <- as.data.frame(age1_mat) %>%
+          dplyr::mutate(draw = dplyr::row_number()) %>%
+          tidyr::pivot_longer(-draw, names_to = "var", values_to = "value_rel") %>%
+          dplyr::mutate(
+            time_index = as.integer(gsub("Nat\\[1,|\\]", "", var)),
+            year = year_start + time_index - 1,
+            RecCorr = RecCorr_label
+          ) %>%
+          dplyr::select(year, value_rel, draw, RecCorr)
+        nat_df
+      }
+
+      nat_parts <- lapply(rho_levels_chr, function(lab) make_nat_draws_long(sim_list[[lab]], lab))
+      nat_parts <- nat_parts[!vapply(nat_parts, is.null, logical(1))]
+      if (length(nat_parts) == 0) next
+
+      nat_draws_long <- dplyr::bind_rows(nat_parts) %>% dplyr::mutate(RecCorr = as.numeric(RecCorr))
+      nat_summary <- nat_draws_long %>%
+        dplyr::group_by(year, RecCorr) %>%
+        dplyr::summarise(
+          mean  = mean(value_rel, na.rm = TRUE),
+          lower = quantile(value_rel, 0.025, na.rm = TRUE),
+          upper = quantile(value_rel, 0.975, na.rm = TRUE),
+          q10   = quantile(value_rel, 0.10,  na.rm = TRUE),
+          q90   = quantile(value_rel, 0.90,  na.rm = TRUE),
+          .groups = "drop"
+        ) %>%
+        dplyr::mutate(
+          gamma       = gamma_val,
+          natexponent = natexponent_val,
+          pmixL       = pmixL_val
+        )
+
+      result_summary_list[[facet_record]] <- nat_summary
+      facet_record <- facet_record + 1
+    }
+  }
+}
+  
+}))
+
+
+all_nat_summary <- dplyr::bind_rows(result_summary_list)
+
+# Configure factors and labels
+all_nat_summary <- all_nat_summary %>%
+  dplyr::mutate(
+    RecCorr     = as.numeric(RecCorr),
+    RecCorr_chr = sprintf("%.1f", RecCorr),
+    rho_R       = factor(RecCorr_chr, levels = rho_levels_chr),
+    row_lab     = sprintf("γ=%g, η=%s, ζ=%g", gamma, pmixL, natexponent)
+  )
+
+# Recruitment deviation example data
+rdev_demo_long <- if (length(rdev_demo_long_all) > 0) dplyr::bind_rows(rdev_demo_long_all) else NULL
+if (!is.null(rdev_demo_long)) {
+  rdev_demo_long <- rdev_demo_long %>% dplyr::mutate(row_lab = "Recruitment deviation")
+}
+
+# Ensure panel completeness
+all_nat_summary <- ensure_panel_levels(all_nat_summary, rho_levels_chr)
+
+# Filter data for plotting
+has_data_by_rho <- all_nat_summary %>%
+  dplyr::group_by(rho_R) %>%
+  dplyr::summarise(has_data = any(is.finite(mean)), .groups = "drop")
+df_ribbon <- all_nat_summary %>%
+  dplyr::semi_join(dplyr::filter(has_data_by_rho, has_data), by = "rho_R")
+
+# Color scheme
+rho_color_map <- c("0.0" = "#1f78b4", "0.4" = "#33a02c")
+
+# Top panel: Recruitment deviations with mathematical facet labels
+p_top <- NULL
+if (!is.null(rdev_demo_long) && nrow(rdev_demo_long) > 0) {
+  rdev_samples <- sort(unique(rdev_demo_long$sample_id))
+  rdev_cols <- viridisLite::viridis(length(rdev_samples), option = "D", begin = 0.05, end = 0.95)
+  names(rdev_cols) <- rdev_samples
+
+  p_top <- ggplot2::ggplot(
+      rdev_demo_long,
+      ggplot2::aes(x = year, y = Rdev, colour = sample_id, group = sample_id)
+    ) +
+    ggplot2::geom_hline(yintercept = 0, colour = "grey60", linewidth = 0.4) +
+    ggplot2::geom_line(linewidth = 1.0, alpha = 0.95, show.legend = FALSE) +
+    ggplot2::facet_grid(
+      rows = ggplot2::vars(row_lab),
+      cols = ggplot2::vars(rho_R),
+      labeller = ggplot2::labeller(
+        .rows = ggplot2::label_value,
+        rho_R = ggplot2::as_labeller(rho_facet_labels, default = ggplot2::label_parsed)
+      )
+    ) +
+    ggplot2::scale_colour_manual(values = rdev_cols) +
+    ggplot2::labs(x = NULL, y = expression( epsilon[t]^R )) +
+    ggplot2::theme(
+      strip.background.x = ggplot2::element_rect(fill = "grey90", colour = NA),
+      strip.text.x       = ggplot2::element_text(size = 9.5),
+      strip.background.y = ggplot2::element_rect(fill = "grey95", colour = NA),
+      strip.text.y.left  = ggplot2::element_text(angle = 0, hjust = 0),
+      strip.text.y.right = ggplot2::element_blank(),
+      strip.placement    = "outside",
+      axis.title.y = ggplot2::element_text(size = 12),
+      axis.text.x  = ggplot2::element_blank(),
+      axis.ticks.x = ggplot2::element_blank(),
+      legend.position = "none",
+      plot.margin = ggplot2::margin(4, 4, 2, 6)
+    ) +
+    theme_left_y_only
+}
+
+# Bottom panel: Relative recruitment size
+p_main <- ggplot2::ggplot() +
+  ggplot2::geom_ribbon(
+    data = df_ribbon,
+    ggplot2::aes(x = year, ymin = lower, ymax = upper, fill = rho_R),
+    alpha = 0.20, colour = NA, na.rm = TRUE
+  ) +
+  ggplot2::geom_ribbon(
+    data = df_ribbon,
+    ggplot2::aes(x = year, ymin = q10, ymax = q90, fill = rho_R),
+    alpha = 0.35, colour = NA, na.rm = TRUE
+  ) +
+  ggplot2::geom_line(
+    data = df_ribbon,
+    ggplot2::aes(x = year, y = mean, colour = rho_R),
+    linewidth = 0.9, na.rm = TRUE
+  ) +
+  ggplot2::facet_grid(
+    rows = ggplot2::vars(row_lab),
+    cols = ggplot2::vars(rho_R),
+    labeller = ggplot2::labeller(.rows = ggplot2::label_value, rho_R = empty_col_labeller)
+  ) +
+  ggplot2::scale_colour_manual(values = rho_color_map, drop = FALSE, guide = "none") +
+  ggplot2::scale_fill_manual(values   = rho_color_map, drop = FALSE, guide = "none") +
+  ggplot2::geom_hline(yintercept = 1, linetype = "dashed", colour = "grey40", linewidth = 0.6) +
+  ggplot2::coord_cartesian(ylim = c(0, 6)) +
+  ggplot2::labs(
+    x = "Year",
+    y = expression( R[t] / R[0])
+  ) +
+  ggplot2::theme(
+    strip.background.x = ggplot2::element_blank(),
+    strip.text.x       = ggplot2::element_blank(),
+    strip.text.y.left  = ggplot2::element_text(angle = 0, hjust = 0),
+    strip.text.y.right = ggplot2::element_text(size = 8),
+    legend.position = "bottom",
+    axis.title = ggplot2::element_text(size = 12),
+    plot.margin = ggplot2::margin(0, 4, 4, 6)
+  ) +
+  theme_left_y_only
+
+# Combine panels with patchwork or cowplot
+if (!is.null(p_top) && requireNamespace("patchwork", quietly = TRUE)) {
+  library(patchwork)
+  p_combined <- p_top / p_main + patchwork::plot_layout(heights = c(0.9, 4))
+  p_final <- p_combined +
+    patchwork::plot_annotation(
+      tag_levels = list(c("(a)", "(b)")),
+      theme = ggplot2::theme(
+        plot.tag = ggplot2::element_text(size = 12),
+        plot.tag.position = c(0.01, 1)
+      )
+    ) &
+    ggplot2::theme(plot.margin = ggplot2::margin(2, 2, 2, 2))
+  print(p_final)
+} else if (!is.null(p_top) && requireNamespace("cowplot", quietly = TRUE)) {
+  library(cowplot)
+  p_stack <- cowplot::plot_grid(
+    p_top, p_main, ncol = 1, rel_heights = c(0.9, 4), align = "v",
+    labels = c("(a)", "(b)"), label_size = 12,
+    label_x = 0.01, label_y = 1
+  )
+  p_stack <- cowplot::ggdraw(p_stack) + ggplot2::theme(plot.margin = ggplot2::margin(2,2,2,2))
+  print(p_stack)
+} else {
+  if (!is.null(p_top)) print(p_top)
+  print(p_main)
+}
+
+
+```
