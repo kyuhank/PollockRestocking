@@ -66,7 +66,7 @@ This document outlines the simulation-based verification and performance testing
 # Deterministic mode with zero random effects (no MVN sampling)
 
 # Model parameters
-R0_values <- c(5e8, 1e9, 5e9, 1e10)
+R0_values <- c(2e9, 4e9, 6e9)
 steepness_values <- seq(0.25, 0.85, by = 0.2)
 gamma_values <- c(1, 2)
 pmixl_values <- c(0.5, 5)      # η
@@ -738,7 +738,7 @@ nyears <- 90
 chains <- 10
 InputPriorDraws <- 100 
 
-R0_fixed <- 1e10
+R0_fixed <- 5e9
 Mmedian <- 0.22; sigM <- 0
 sigR <- 1; sigL05 <- 0; sigL95 <- 0
 L05_min <- 12.5; L05_max <- 12.5
