@@ -11,5 +11,11 @@ The collapse of the Korean pollock (*Gadus chalcogrammus*) stock in the late 199
 
 # How to run the code
 
-run the script `launch_script.R` 
+## for the analysis
+
+run the script `launch_script.R`
+
+## for the verification of the model implementation
+
+run the script `verification/model_verification_test.Rmd`
 
